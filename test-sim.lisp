@@ -90,4 +90,35 @@
             (getf cnt :done)  nil)))
   (check "After reset: C0 off" (get-bit plc 'c0) nil))
 
+;;; -----------------------------------------------------------------------
+;;; RST counter: memory bit cleared immediately in same scan as RST
+;;; Program: X2 -> CNT C1 K2, X3 -> RST C1
+;;; -----------------------------------------------------------------------
+(format t "~%=== RST counter: bit cleared immediately ===~%")
+(let* ((prog '((ld x2) (cnt c1 2)
+               (ld x3) (rst c1)))
+       (plc (make-plc prog)))
+
+  ;; Pulse X2 twice to reach preset
+  (dotimes (_ 2)
+    (set-input plc 'x2 t)  (plc-step plc)
+    (set-input plc 'x2 nil) (plc-step plc))
+  (check "RST test: C1 done after 2 pulses" (get-bit plc 'c1) t)
+
+  ;; RST C1 while X2 is still HIGH — bit must go nil in this same scan
+  (set-input plc 'x2 t)
+  (set-input plc 'x3 t)
+  (plc-step plc)
+  (check "RST test: C1 cleared immediately" (get-bit plc 'c1) nil)
+
+  ;; X2 stays high, RST released — prev-enable is T so no spurious edge
+  (set-input plc 'x3 nil)
+  (plc-step plc)
+  (check "RST test: C1 stays 0 (no spurious rising edge)" (get-bit plc 'c1) nil)
+
+  ;; Genuine low→high pulse → count=1, not done yet (preset=2)
+  (set-input plc 'x2 nil) (plc-step plc)
+  (set-input plc 'x2 t)   (plc-step plc)
+  (check "RST test: C1 not done after 1 new pulse" (get-bit plc 'c1) nil))
+
 (format t "~%Done.~%")

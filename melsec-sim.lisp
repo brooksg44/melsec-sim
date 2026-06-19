@@ -76,11 +76,14 @@
              (when val
                (cond
                  ((gethash arg (counters plc)) ; Reset Counter
-                  (setf (getf (gethash arg (counters plc)) :count) 0
-                        (getf (gethash arg (counters plc)) :done) nil))
+                  (let ((cnt (gethash arg (counters plc))))
+                    (setf (getf cnt :count) 0
+                          (getf cnt :done) nil))
+                  (set-bit plc arg nil))
                  ((gethash arg (timers plc)) ; Reset Timer
                   (setf (getf (gethash arg (timers plc)) :acc) 0
-                        (getf (gethash arg (timers plc)) :done) nil))
+                        (getf (gethash arg (timers plc)) :done) nil)
+                  (set-bit plc arg nil))
                  (t (set-bit plc arg nil)))))) ; Reset standard bit
 
       ;; --- Timers (TON - Timer On Delay) ---
