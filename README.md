@@ -1,5 +1,7 @@
 # melsec-sim
 
+[![CI](https://github.com/brooksg44/melsec-sim/actions/workflows/ci.yml/badge.svg)](https://github.com/brooksg44/melsec-sim/actions/workflows/ci.yml)
+
 A Mitsubishi PLC (MELSEC) Instruction List (IL) simulator written in Common Lisp.
 
 ## Overview
