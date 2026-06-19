@@ -1,4 +1,5 @@
-(load "melsec-sim.lisp")
+(ql:quickload :bordeaux-threads :silent t)
+(load (merge-pathnames "melsec-sim.lisp" *load-pathname*))
 (in-package :melsec-sim)
 
 (defvar my-plc (make-plc *example-program* :scan-time-ms 100))
@@ -15,13 +16,10 @@
 
 ;; Step 10 more times to let the timer (T0) reach 1000ms (10 scans * 100ms)
 (dotimes (i 10) (plc-step my-plc))
-(print-state my-plc 'y0 't0) ;; T0 should now be T!
+(print-state my-plc 'y0 't0) ; T0 should now be T
 
 ;; Press the Stop button (X1)
 (set-input my-plc 'x1 t)
 (plc-step my-plc)
-(print-state my-plc 'y0 't0) ;; Motor and Timer reset
-(
- set-input my-plc 'x1 nil)
-
-
+(print-state my-plc 'y0 't0) ; Motor and Timer reset
+(set-input my-plc 'x1 nil)

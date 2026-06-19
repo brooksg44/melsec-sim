@@ -121,4 +121,134 @@
   (set-input plc 'x2 t)   (plc-step plc)
   (check "RST test: C1 not done after 1 new pulse" (get-bit plc 'c1) nil))
 
+;;; -----------------------------------------------------------------------
+;;; ANB / ORB: block AND/OR for parallel branches
+;;; (X0 AND X1) OR (X2 AND X3) -> Y1
+;;; -----------------------------------------------------------------------
+(format t "~%=== ANB / ORB ===~%")
+(let* ((prog '((ld x0) (and x1)
+               (ld x2) (and x3)
+               (orb)
+               (out y1)))
+       (plc (make-plc prog)))
+
+  (set-input plc 'x0 t) (set-input plc 'x1 t)
+  (plc-step plc)
+  (check "ORB: branch-1 true -> Y1 on" (get-bit plc 'y1) t)
+
+  (set-input plc 'x0 nil) (set-input plc 'x1 nil)
+  (set-input plc 'x2 t)   (set-input plc 'x3 t)
+  (plc-step plc)
+  (check "ORB: branch-2 true -> Y1 on" (get-bit plc 'y1) t)
+
+  (set-input plc 'x2 nil)
+  (plc-step plc)
+  (check "ORB: both branches false -> Y1 off" (get-bit plc 'y1) nil))
+
+;;; -----------------------------------------------------------------------
+;;; MPS / MRD / MPP: multi-output rung from a single condition
+;;; X0 -> MPS; AND X1 -> OUT Y1; MRD; AND X2 -> OUT Y2; MPP -> OUT Y3
+;;; -----------------------------------------------------------------------
+(format t "~%=== MPS / MRD / MPP ===~%")
+(let* ((prog '((ld x0)
+               (mps)
+               (and x1)
+               (out y1)
+               (mrd)
+               (and x2)
+               (out y2)
+               (mpp)
+               (out y3)))
+       (plc (make-plc prog)))
+
+  (set-input plc 'x0 t)
+  (set-input plc 'x1 t)
+  (set-input plc 'x2 nil)
+  (plc-step plc)
+  (check "MPS: X0+X1 -> Y1 on"  (get-bit plc 'y1) t)
+  (check "MPS: X0+X2 -> Y2 off" (get-bit plc 'y2) nil)
+  (check "MPP: X0 -> Y3 on"     (get-bit plc 'y3) t)
+
+  (set-input plc 'x0 nil)
+  (plc-step plc)
+  (check "MPS: X0=nil -> Y3 off" (get-bit plc 'y3) nil))
+
+;;; -----------------------------------------------------------------------
+;;; CTD: count-down counter
+;;; -----------------------------------------------------------------------
+(format t "~%=== CTD: count-down counter ===~%")
+(let* ((prog '((ld x0) (ctd cd0 3)))
+       (plc (make-plc prog)))
+
+  ;; Two pulses: count goes 3->2->1, not done yet
+  (dotimes (_ 2)
+    (set-input plc 'x0 t)  (plc-step plc)
+    (set-input plc 'x0 nil) (plc-step plc))
+  (check "CTD: after 2 pulses not done" (get-bit plc 'cd0) nil)
+
+  ;; Third pulse: count reaches 0, done
+  (set-input plc 'x0 t) (plc-step plc)
+  (check "CTD: after 3 pulses done" (get-bit plc 'cd0) t)
+
+  ;; RST CD0 restores count to preset (3), not to 0
+  (let* ((prog2 '((ld x0) (ctd cd0 3) (ld x1) (rst cd0)))
+         (plc2 (make-plc prog2)))
+    (dotimes (_ 3)
+      (set-input plc2 'x0 t)  (plc-step plc2)
+      (set-input plc2 'x0 nil) (plc-step plc2))
+    (check "CTD RST: done before reset" (get-bit plc2 'cd0) t)
+    (set-input plc2 'x1 t) (plc-step plc2)
+    (check "CTD RST: cleared" (get-bit plc2 'cd0) nil)
+    ;; After RST count is back at preset=3; one pulse should NOT be done
+    (set-input plc2 'x1 nil)
+    (set-input plc2 'x0 nil) (plc-step plc2)
+    (set-input plc2 'x0 t)   (plc-step plc2)
+    (check "CTD RST: 1 pulse after reset not done" (get-bit plc2 'cd0) nil)))
+
+;;; -----------------------------------------------------------------------
+;;; TOF: off-delay timer
+;;; -----------------------------------------------------------------------
+(format t "~%=== TOF: off-delay timer (1000 ms @ 100 ms scan) ===~%")
+(let* ((prog '((ld x0) (tof tf0 1000)))
+       (plc (make-plc prog :scan-time-ms 100)))
+
+  ;; Enable: output is ON immediately
+  (set-input plc 'x0 t) (plc-step plc)
+  (check "TOF: enabled -> output on immediately" (get-bit plc 'tf0) t)
+
+  ;; Disable: output must remain ON for 1000 ms (10 scans)
+  (set-input plc 'x0 nil)
+  (dotimes (_ 9) (plc-step plc))
+  (check "TOF: after 900 ms still on" (get-bit plc 'tf0) t)
+  (plc-step plc)
+  (check "TOF: after 1000 ms off" (get-bit plc 'tf0) nil))
+
+;;; -----------------------------------------------------------------------
+;;; Data registers: MOV / ADD / SUB / CMP
+;;; -----------------------------------------------------------------------
+(format t "~%=== Data registers: MOV / ADD / SUB / CMP ===~%")
+(let* ((prog '((ld m0)
+               (mov 42 d0)
+               (ld m0)
+               (add d0 8 d1)
+               (ld m0)
+               (sub d1 10 d2)
+               (ld m0)
+               (cmp d0 42)))
+       (plc (make-plc prog)))
+
+  ;; With M0=nil, nothing should execute
+  (plc-step plc)
+  (check "MOV: M0=nil, D0 unchanged" (get-word plc 'd0) 0)
+
+  ;; With M0=T, instructions execute
+  (set-bit plc 'm0 t)
+  (plc-step plc)
+  (check "MOV: D0 = 42"       (get-word plc 'd0) 42)
+  (check "ADD: D1 = 50"       (get-word plc 'd1) 50)
+  (check "SUB: D2 = 40"       (get-word plc 'd2) 40)
+  (check "CMP: M8020 (=)"     (get-bit plc 'm8020) t)
+  (check "CMP: M8021 (<) off" (get-bit plc 'm8021) nil)
+  (check "CMP: M8022 (>) off" (get-bit plc 'm8022) nil))
+
 (format t "~%Done.~%")
