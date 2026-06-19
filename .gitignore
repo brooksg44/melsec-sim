@@ -1,0 +1,25 @@
+# Compiled Lisp files
+*.fasl
+*.fas
+*.lib
+*.abcl
+
+# Implementation-specific compiled files
+*.dx32fsl
+*.dx64fsl
+*.lx32fsl
+*.lx64fsl
+*.x86f
+*.sparcf
+*.pfsl
+*.dfsl
+*.p64fsl
+
+# Lisp image/core dumps
+*.core
+*.image
+
+# Editor backups
+*~
+\#*\#
+.\#*
