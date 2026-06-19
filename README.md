@@ -185,6 +185,22 @@ All 37 checks should report `[PASS]`.
 
 ## Changelog
 
+### v0.2.3
+
+- **RST timer redundant hash lookup** — the RST timer branch called `gethash`
+  three times for the same key (once in the `cond` test, then twice inside the
+  body). The plist is now bound once with `let`, eliminating the redundant
+  lookups and making the code easier to read.
+- **`resolve-operand` helper** — the six duplicated `(if (numberp x) x
+  (get-word plc x))` expressions in `MOV`, `ADD`, `SUB`, and `CMP` are
+  replaced by a single `resolve-operand` helper that reads `data-regs` directly
+  (it runs under the scan lock, so the extra lock acquisition that `get-word`
+  would incur is unnecessary).
+- **Test suite: `get-output` for Y reads** — the ANB/ORB and MPS/MRD/MPP test
+  sections were using the internal `get-bit` function to read Y coils; changed
+  to `get-output` (the public, lock-safe accessor) to match the rest of the
+  test suite.
+
 ### v0.2.2
 
 - **Nil preset crash** — `TIM`/`TOF`/`CNT`/`CTD` instructions with a missing
