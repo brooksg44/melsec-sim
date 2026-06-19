@@ -134,16 +134,16 @@
 
   (set-input plc 'x0 t) (set-input plc 'x1 t)
   (plc-step plc)
-  (check "ORB: branch-1 true -> Y1 on" (get-bit plc 'y1) t)
+  (check "ORB: branch-1 true -> Y1 on" (get-output plc 'y1) t)
 
   (set-input plc 'x0 nil) (set-input plc 'x1 nil)
   (set-input plc 'x2 t)   (set-input plc 'x3 t)
   (plc-step plc)
-  (check "ORB: branch-2 true -> Y1 on" (get-bit plc 'y1) t)
+  (check "ORB: branch-2 true -> Y1 on" (get-output plc 'y1) t)
 
   (set-input plc 'x2 nil)
   (plc-step plc)
-  (check "ORB: both branches false -> Y1 off" (get-bit plc 'y1) nil))
+  (check "ORB: both branches false -> Y1 off" (get-output plc 'y1) nil))
 
 ;;; -----------------------------------------------------------------------
 ;;; MPS / MRD / MPP: multi-output rung from a single condition
@@ -165,13 +165,13 @@
   (set-input plc 'x1 t)
   (set-input plc 'x2 nil)
   (plc-step plc)
-  (check "MPS: X0+X1 -> Y1 on"  (get-bit plc 'y1) t)
-  (check "MPS: X0+X2 -> Y2 off" (get-bit plc 'y2) nil)
-  (check "MPP: X0 -> Y3 on"     (get-bit plc 'y3) t)
+  (check "MPS: X0+X1 -> Y1 on"  (get-output plc 'y1) t)
+  (check "MPS: X0+X2 -> Y2 off" (get-output plc 'y2) nil)
+  (check "MPP: X0 -> Y3 on"     (get-output plc 'y3) t)
 
   (set-input plc 'x0 nil)
   (plc-step plc)
-  (check "MPS: X0=nil -> Y3 off" (get-bit plc 'y3) nil))
+  (check "MPS: X0=nil -> Y3 off" (get-output plc 'y3) nil))
 
 ;;; -----------------------------------------------------------------------
 ;;; CTD: count-down counter

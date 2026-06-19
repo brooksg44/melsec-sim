@@ -66,6 +66,10 @@
 
 (declaim (ftype function handle-timer handle-timer-off handle-counter handle-countdown))
 
+(defun resolve-operand (plc x)
+  "Returns x if numeric, otherwise reads x as a D register (called under the scan lock)."
+  (if (numberp x) x (gethash x (data-regs plc) 0)))
+
 (defun eval-instr (plc instr)
   "Evaluates a single instruction against the PLC state."
   (let ((op  (first  instr))
@@ -113,8 +117,9 @@
                           (getf cnt :done)  nil))
                   (set-bit plc arg nil))
                  ((gethash arg (timers plc))
-                  (setf (getf (gethash arg (timers plc)) :acc)  0
-                        (getf (gethash arg (timers plc)) :done) nil)
+                  (let ((tmr (gethash arg (timers plc))))
+                    (setf (getf tmr :acc)  0
+                          (getf tmr :done) nil))
                   (set-bit plc arg nil))
                  (t (set-bit plc arg nil))))))
 
@@ -153,7 +158,7 @@
                  (src    (second instr))
                  (dst    (third  instr)))
              (when enable
-               (set-word plc dst (if (numberp src) src (get-word plc src))))))
+               (setf (gethash dst (data-regs plc)) (resolve-operand plc src)))))
 
       ;; (add s1 s2 dst) — dst := s1 + s2
       (add (let ((enable (pop (stack plc)))
@@ -161,9 +166,8 @@
                  (s2     (third  instr))
                  (dst    (fourth instr)))
              (when enable
-               (set-word plc dst
-                         (+ (if (numberp s1) s1 (get-word plc s1))
-                            (if (numberp s2) s2 (get-word plc s2)))))))
+               (setf (gethash dst (data-regs plc))
+                     (+ (resolve-operand plc s1) (resolve-operand plc s2))))))
 
       ;; (sub s1 s2 dst) — dst := s1 - s2
       (sub (let ((enable (pop (stack plc)))
@@ -171,17 +175,16 @@
                  (s2     (third  instr))
                  (dst    (fourth instr)))
              (when enable
-               (set-word plc dst
-                         (- (if (numberp s1) s1 (get-word plc s1))
-                            (if (numberp s2) s2 (get-word plc s2)))))))
+               (setf (gethash dst (data-regs plc))
+                     (- (resolve-operand plc s1) (resolve-operand plc s2))))))
 
       ;; (cmp s1 s2) — sets M8020 (s1=s2), M8021 (s1<s2), M8022 (s1>s2)
       (cmp (let ((enable (pop (stack plc)))
                  (s1     (second instr))
                  (s2     (third  instr)))
              (when enable
-               (let ((v1 (if (numberp s1) s1 (get-word plc s1)))
-                     (v2 (if (numberp s2) s2 (get-word plc s2))))
+               (let ((v1 (resolve-operand plc s1))
+                     (v2 (resolve-operand plc s2)))
                  (set-bit plc 'm8020 (=  v1 v2))
                  (set-bit plc 'm8021 (<  v1 v2))
                  (set-bit plc 'm8022 (>  v1 v2))))))
