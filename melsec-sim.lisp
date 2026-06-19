@@ -35,11 +35,13 @@
 
 (defun make-plc (program &key (scan-time-ms 100))
   (let ((plc (make-instance 'plc :program program :scan-time-ms scan-time-ms)))
-    (setf (lock plc) (bt:make-lock "plc-lock"))
+    (setf (lock plc) (bt:make-recursive-lock "plc-lock"))
     plc))
 
 ;;;
-;;; 2. Memory Accessors (internal, no locking)
+;;; 2. Memory Accessors
+;;; get-bit / set-bit are internal (called under the lock from eval-instr).
+;;; get-word / set-word are public and acquire the lock themselves.
 ;;;
 
 (defun get-bit (plc addr)
@@ -49,12 +51,14 @@
   (setf (gethash addr (memory plc)) val))
 
 (defun get-word (plc addr)
-  "Reads a word (integer) from a D data register."
-  (gethash addr (data-regs plc) 0))
+  "Reads a word (integer) from a D data register, thread-safe."
+  (bt:with-recursive-lock-held ((lock plc))
+    (gethash addr (data-regs plc) 0)))
 
 (defun set-word (plc addr val)
-  "Writes a word (integer) to a D data register."
-  (setf (gethash addr (data-regs plc)) val))
+  "Writes a word (integer) to a D data register, thread-safe."
+  (bt:with-recursive-lock-held ((lock plc))
+    (setf (gethash addr (data-regs plc)) val)))
 
 ;;;
 ;;; 3. Instruction Set Implementation
@@ -117,16 +121,28 @@
       ;; --- Timers ---
       ;; TON (on-delay): preset in ms; accumulates scan-time-ms each enabled scan.
       ;; Example: (tim t0 1000) fires after Y0 has been ON for 1000 ms total.
-      (tim (handle-timer     plc arg (pop (stack plc)) (third instr)))
+      (tim (let ((enable (pop (stack plc))) (preset (third instr)))
+             (if preset
+                 (handle-timer plc arg enable preset)
+                 (format t "~&TIM ~a: missing preset — instruction skipped~%" arg))))
       ;; TOF (off-delay): output turns ON immediately when enabled and stays ON
       ;; for preset ms after the enable signal drops.
-      (tof (handle-timer-off plc arg (pop (stack plc)) (third instr)))
+      (tof (let ((enable (pop (stack plc))) (preset (third instr)))
+             (if preset
+                 (handle-timer-off plc arg enable preset)
+                 (format t "~&TOF ~a: missing preset — instruction skipped~%" arg))))
 
       ;; --- Counters ---
       ;; CTU (count-up): fires on rising edge when cumulative count reaches preset.
-      (cnt (handle-counter   plc arg (pop (stack plc)) (third instr)))
+      (cnt (let ((enable (pop (stack plc))) (preset (third instr)))
+             (if preset
+                 (handle-counter plc arg enable preset)
+                 (format t "~&CNT ~a: missing preset — instruction skipped~%" arg))))
       ;; CTD (count-down): fires when count decrements from preset to 0.
-      (ctd (handle-countdown plc arg (pop (stack plc)) (third instr)))
+      (ctd (let ((enable (pop (stack plc))) (preset (third instr)))
+             (if preset
+                 (handle-countdown plc arg enable preset)
+                 (format t "~&CTD ~a: missing preset — instruction skipped~%" arg))))
 
       ;; --- Data Registers / Arithmetic ---
       ;; All application instructions below are conditional: they execute only
@@ -233,7 +249,7 @@
 
 (defun run-scan (plc)
   "Executes one full PLC scan cycle under the PLC lock."
-  (bt:with-lock-held ((lock plc))
+  (bt:with-recursive-lock-held ((lock plc))
     (setf (stack plc) nil)
     (dolist (instr (program plc))
       (eval-instr plc instr))))
@@ -244,22 +260,26 @@
 
 (defun plc-run (plc)
   "Starts the PLC scanning loop in a background thread."
-  (when (not (running plc))
-    (setf (running plc) t)
-    (setf (thread plc)
-          (bt:make-thread
-           (lambda ()
-             (loop while (running plc) do
-               (run-scan plc)
-               (sleep (/ (scan-time-ms plc) 1000.0))))
-           :name "PLC-Scan-Loop"))))
+  (bt:with-recursive-lock-held ((lock plc))
+    (unless (running plc)
+      (setf (running plc) t)
+      (setf (thread plc)
+            (bt:make-thread
+             (lambda ()
+               (loop while (running plc) do
+                 (run-scan plc)
+                 (sleep (/ (scan-time-ms plc) 1000.0))))
+             :name "PLC-Scan-Loop")))))
 
 (defun plc-stop (plc)
   "Stops the PLC background thread."
-  (when (running plc)
-    (setf (running plc) nil)
-    (bt:join-thread (thread plc))
-    (setf (thread plc) nil)))
+  (let ((thr nil))
+    (bt:with-recursive-lock-held ((lock plc))
+      (when (running plc)
+        (setf (running plc) nil
+              thr            (thread plc)
+              (thread plc)   nil)))
+    (when thr (bt:join-thread thr))))
 
 (defun plc-step (plc)
   "Executes a single scan cycle manually (useful for debugging)."
@@ -271,20 +291,21 @@
 
 (defun set-input (plc addr value)
   "Sets a physical input (X), thread-safe."
-  (bt:with-lock-held ((lock plc))
+  (bt:with-recursive-lock-held ((lock plc))
     (set-bit plc addr value)))
 
 (defun get-output (plc addr)
   "Reads a physical output (Y), thread-safe."
-  (bt:with-lock-held ((lock plc))
+  (bt:with-recursive-lock-held ((lock plc))
     (get-bit plc addr)))
 
 (defun print-state (plc &rest addrs)
-  "Prints the current state of specified memory addresses."
-  (format t "---- PLC State ----~%")
-  (dolist (addr addrs)
-    (format t "~a: ~a~%" addr (get-bit plc addr)))
-  (format t "-------------------~%"))
+  "Prints the current state of specified memory addresses, thread-safe."
+  (bt:with-recursive-lock-held ((lock plc))
+    (format t "---- PLC State ----~%")
+    (dolist (addr addrs)
+      (format t "~a: ~a~%" addr (get-bit plc addr)))
+    (format t "-------------------~%")))
 
 ;;;
 ;;; 7. Example Ladder Logic Program
