@@ -82,6 +82,7 @@ Addresses are plain Lisp symbols (`'x0`, `'y1`, `'d0`, etc.).
 
 | File | Description |
 |---|---|
+| `melsec-sim.asd` | ASDF system definition |
 | `melsec-sim.lisp` | Core simulator: PLC class, instruction evaluator, scan loop, helpers |
 | `test-sim.lisp` | 37 verification checks covering all instruction groups |
 | `single-step.lisp` | Manual single-scan demo |
@@ -92,12 +93,36 @@ Addresses are plain Lisp symbols (`'x0`, `'y1`, `'d0`, etc.).
 - [bordeaux-threads](https://github.com/sionescu/bordeaux-threads) — for the PLC lock and background scan thread
 - [Quicklisp](https://www.quicklisp.org/) — for loading dependencies
 
+## Installation
+
+**Via Quicklisp** (recommended):
+
+```bash
+# Symlink or clone into Quicklisp's local-projects directory
+ln -s /path/to/melsec-sim ~/quicklisp/local-projects/melsec-sim
+```
+
+```lisp
+(ql:quickload "melsec-sim")
+```
+
+**Via ASDF directly:**
+
+```lisp
+(asdf:load-asd "/path/to/melsec-sim/melsec-sim.asd")
+(asdf:load-system "melsec-sim")
+```
+
+**Plain `load`** (no ASDF required):
+
+```lisp
+(ql:quickload :bordeaux-threads)
+(load "/path/to/melsec-sim/melsec-sim.lisp")
+```
+
 ## Usage
 
 ```lisp
-;; Load via SLIME or SBCL
-(ql:quickload :bordeaux-threads)
-(load "melsec-sim.lisp")
 (in-package :melsec-sim)
 
 ;; Create a PLC with the built-in example program
@@ -142,6 +167,14 @@ X2 (Pulse) --|  |--------------------------( C0 K3 )
 
 ## Running the Tests
 
+**Via ASDF:**
+
+```lisp
+(asdf:load-system "melsec-sim/tests")
+```
+
+**From the shell:**
+
 ```bash
 sbcl --noinform --load test-sim.lisp --eval '(quit)'
 ```
@@ -149,6 +182,10 @@ sbcl --noinform --load test-sim.lisp --eval '(quit)'
 All 37 checks should report `[PASS]`.
 
 ## Changelog
+
+### v0.2.1
+
+- Added `melsec-sim.asd` ASDF system definition (`melsec-sim` and `melsec-sim/tests`).
 
 ### v0.2.0
 
