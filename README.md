@@ -185,15 +185,37 @@ All 37 checks should report `[PASS]`.
 
 ## Changelog
 
+### v0.2.2
+
+- **Nil preset crash** — `TIM`/`TOF`/`CNT`/`CTD` instructions with a missing
+  preset argument (`(third instr)` returning `nil`) previously called `>=` with
+  `nil`, signalling a type error that killed the background scan thread silently.
+  The evaluator now validates the preset and logs a warning instead of crashing.
+- **`get-word`/`set-word` data race** — both functions are part of the public API
+  but accessed `data-regs` without holding the lock, allowing concurrent
+  corruption with the scan thread's `MOV`/`ADD`/`SUB` instructions. Both now use
+  `bt:with-recursive-lock-held`.
+- **`print-state` torn reads** — `print-state` read individual bits without the
+  lock, producing impossible mid-scan snapshots (e.g., coil ON, timer not yet
+  updated). It now holds the lock for the entire printout.
+- **`plc-run` duplicate thread race** — concurrent calls to `plc-run` could both
+  observe `running = nil` and each spawn a scan thread. The running flag is now
+  checked and set atomically under the lock; `plc-stop` similarly clears it under
+  the lock and joins after releasing to avoid deadlock.
+- Switched from `bt:make-lock` to `bt:make-recursive-lock` (and
+  `bt:with-recursive-lock-held` throughout) so that `get-word`/`set-word` can be
+  called from within `eval-instr` (already inside the scan lock) without
+  deadlocking.
+
 ### v0.2.1
 
 - Added `melsec-sim.asd` ASDF system definition (`melsec-sim` and `melsec-sim/tests`).
 
 ### v0.2.0
 
-- **Thread safety** — `make-plc` creates a `bt:make-lock`; the scan cycle
-  (`run-scan`) and the public I/O helpers (`set-input`, `get-output`) hold it,
-  preventing data races when using `plc-run`.
+- **Thread safety** — `make-plc` creates a lock; the scan cycle (`run-scan`) and
+  the public I/O helpers (`set-input`, `get-output`) hold it, preventing data
+  races when using `plc-run`.
 - **New instructions** — `ANB`, `ORB`, `MPS`, `MRD`, `MPP`, `TOF`, `CTD`,
   `MOV`, `ADD`, `SUB`, `CMP`.
 - **D register support** — new `data-regs` hash table; `get-word` / `set-word`
