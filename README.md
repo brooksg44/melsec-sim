@@ -86,13 +86,27 @@ Addresses are plain Lisp symbols (`'x0`, `'y1`, `'d0`, etc.).
 |---|---|
 | `melsec-sim.asd` | ASDF system definition |
 | `melsec-sim.lisp` | Core simulator: PLC class, instruction evaluator, scan loop, helpers |
-| `test-sim.lisp` | 37 verification checks covering all instruction groups |
+| `il-to-ir.lisp` | Stack-to-tree IL → IR parser (`melsec-sim/ir`) |
+| `layout.lisp` | Two-pass backend-agnostic ladder layout engine (`melsec-sim/layout`) |
+| `clim-ui.lisp` | Interactive McCLIM ladder viewer (`melsec-sim/clim`) |
+| `test-sim.lisp` | Verification checks covering all instruction groups |
 | `single-step.lisp` | Manual single-scan demo |
 | `continuous.lisp` | Continuous background-thread scan demo |
 
+## ASDF Systems
+
+| System | Depends on | Purpose |
+|---|---|---|
+| `melsec-sim` | `bordeaux-threads` | Core simulator |
+| `melsec-sim/ir` | — | IL → IR expression-tree parser |
+| `melsec-sim/layout` | `melsec-sim/ir` | Backend-agnostic grid layout engine |
+| `melsec-sim/clim` | `melsec-sim`, `melsec-sim/ir`, `melsec-sim/layout`, `mcclim` | Interactive ladder viewer |
+| `melsec-sim/tests` | `melsec-sim`, `melsec-sim/ir`, `melsec-sim/layout` | Test suite |
+
 ## Dependencies
 
-- [bordeaux-threads](https://github.com/sionescu/bordeaux-threads) — for the PLC lock and background scan thread
+- [bordeaux-threads](https://github.com/sionescu/bordeaux-threads) — PLC lock and background scan thread
+- [McCLIM](https://mcclim.common-lisp.dev/) — interactive ladder viewer (`melsec-sim/clim` only)
 - [Quicklisp](https://www.quicklisp.org/) — for loading dependencies
 
 ## Installation
@@ -105,7 +119,8 @@ ln -s /path/to/melsec-sim ~/quicklisp/local-projects/melsec-sim
 ```
 
 ```lisp
-(ql:quickload "melsec-sim")
+(ql:quickload "melsec-sim")          ; core only
+(ql:quickload "melsec-sim/clim")     ; core + McCLIM viewer
 ```
 
 **Via ASDF directly:**
@@ -144,6 +159,39 @@ ln -s /path/to/melsec-sim ~/quicklisp/local-projects/melsec-sim
 `set-input` and `get-output` are thread-safe; they hold the PLC lock so they
 never race the background scan thread.
 
+## McCLIM Ladder Viewer
+
+`melsec-sim/clim` provides an interactive ladder diagram window powered by
+[McCLIM](https://mcclim.common-lisp.dev/).
+
+```lisp
+(ql:quickload "melsec-sim/clim")
+
+;; Open the viewer with the built-in example program
+(melsec-sim.clim:run)
+
+;; Open with a custom program and scan period
+(melsec-sim.clim:run :program my-program :scan-time-ms 50)
+```
+
+The window has three areas:
+
+- **Ladder** — live ladder diagram.  Contacts light green when energised; coils
+  show their symbol and state.  Timer and counter outputs display their current
+  accumulator value and preset (e.g. `300ms/1000ms` or `2/3`).  Click any
+  operand label to toggle the bit and trigger one scan.
+- **I/O** — scrollable list of every known bit and D register, each clickable
+  to toggle.  Shows `RUN`/`STOP` status and scan count.
+- **Commands** — interactor accepting:
+
+| Command | Effect |
+|---|---|
+| `Scan` | Run one full scan cycle (pauses free-run first) |
+| `Step` | Alias for Scan |
+| `Run` | Free-run: scan + redisplay every 100 ms |
+| `Stop` | Pause free-run |
+| `Toggle <op>` | Flip a bit by name (e.g. `Toggle X0`) |
+
 ## Example Program
 
 The built-in `*example-program*` demonstrates three ladder networks:
@@ -181,9 +229,28 @@ X2 (Pulse) --|  |--------------------------( C0 K3 )
 sbcl --noinform --load test-sim.lisp --eval '(quit)'
 ```
 
-All 37 checks should report `[PASS]`.
+All 128 checks should report `[PASS]`.
 
 ## Changelog
+
+### v0.4.0
+
+- **`melsec-sim/ir`** — stack-to-tree IL → IR parser (`il-to-ir.lisp`).
+  Converts a flat MELSEC instruction list into rung expression trees
+  (`(:and ...)`, `(:or ...)`, `(:contact :no x0)`, `(:coil :ton t0 ...)`)
+  suitable for graphical display.
+- **`melsec-sim/layout`** — two-pass backend-agnostic grid layout engine
+  (`layout.lisp`).  Emits flat primitive lists (`:contact`, `:coil`, `:wire`,
+  `:fb`) in grid coordinates; both SVG renderers and McCLIM consume the same
+  output.
+- **`melsec-sim/clim`** — interactive McCLIM ladder viewer (`clim-ui.lisp`).
+  Live green/grey energised colouring, clickable operand labels to toggle
+  inputs, timer/counter CV/PT display, and Step/Scan/Run/Stop commands.
+- **Core accessors** — `plc-program`, `plc-get-bit`, `plc-set-bit`,
+  `plc-timer-acc`, `plc-counter-cv`, `plc-scan-count`, `plc-snapshot-bits`,
+  `plc-snapshot-words` exported from `melsec-sim` for use by extension packages.
+- **`scan-count` slot** — `run-scan` now increments a scan counter (exposed via
+  `plc-scan-count`) so the viewer can display how many cycles have completed.
 
 ### v0.2.3
 
