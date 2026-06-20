@@ -10,6 +10,12 @@
       (format t "  [PASS] ~a~%" label)
       (format t "  [FAIL] ~a  expected=~a  got=~a~%" label expected got)))
 
+(defun check-equal (label got expected)
+  "Like CHECK but uses EQUAL for deep list comparison (needed for IR nodes)."
+  (if (equal got expected)
+      (format t "  [PASS] ~a~%" label)
+      (format t "  [FAIL] ~a  expected=~s  got=~s~%" label expected got)))
+
 ;;; -----------------------------------------------------------------------
 ;;; Network 1: Motor Start-Stop Seal-in
 ;;;   X0=Start, X1=Stop(NC), Y0=Motor coil
@@ -250,5 +256,119 @@
   (check "CMP: M8020 (=)"     (get-bit plc 'm8020) t)
   (check "CMP: M8021 (<) off" (get-bit plc 'm8021) nil)
   (check "CMP: M8022 (>) off" (get-bit plc 'm8022) nil))
+
+;; -----------------------------------------------------------------------
+;; Load IL→IR parser
+;; -----------------------------------------------------------------------
+(load (merge-pathnames "il-to-ir.lisp" *load-pathname*))
+
+;;; -----------------------------------------------------------------------
+;;; IL → IR parser: correctness tests
+;;; -----------------------------------------------------------------------
+(format t "~%=== IL->IR: example program structure ===~%")
+(let* ((ir (melsec-sim.ir:il->ir *example-program*))
+       (r0 (first ir))    ; Network 1 rung
+       (r1 (second ir))   ; Network 2 rung
+       (r2 (third ir)))   ; Network 3 rung
+
+  (check "IR: 3 rungs produced"        (length ir) 3)
+
+  ;; Network 1 — OUT coil
+  (check "IR rung0 kind = :normal"     (second r0) :normal)
+  (check "IR rung0 operand = y0"       (third  r0) 'y0)
+
+  ;; The condition is (:and (:or (:contact :no x0) (:contact :no y0))
+  ;;                        (:contact :nc x1))
+  (let ((expr (fourth r0)))
+    (check "IR rung0 expr op = :and"   (melsec-sim.ir:node-op expr) :and)
+    (check "IR rung0 :and arity = 2"   (length (melsec-sim.ir:node-args expr)) 2)
+    (let ((lhs (first  (melsec-sim.ir:node-args expr)))
+          (rhs (second (melsec-sim.ir:node-args expr))))
+      (check "IR rung0 lhs op = :or"   (melsec-sim.ir:node-op lhs) :or)
+      (check-equal "IR rung0 rhs = x1/ (NC)" rhs '(:contact :nc x1))))
+
+  ;; Network 2 — TON timer
+  (check "IR rung1 kind = :ton"        (second r1) :ton)
+  (check "IR rung1 operand = t0"       (third  r1) 't0)
+  (check "IR rung1 preset = 1000"      (fifth  r1) 1000)
+  (check-equal "IR rung1 expr = y0 contact"  (fourth r1) '(:contact :no y0))
+
+  ;; Network 3 — CTU counter
+  (check "IR rung2 kind = :ctu"        (second r2) :ctu)
+  (check "IR rung2 operand = c0"       (third  r2) 'c0)
+  (check "IR rung2 preset = 3"         (fifth  r2) 3)
+  (check-equal "IR rung2 expr = x2 contact"  (fourth r2) '(:contact :no x2)))
+
+(format t "~%=== IL->IR: ANB block AND ===~%")
+(let* ((prog '((ld x0) (and x1) (ld x2) (and x3) (anb) (out y1)))
+       (ir   (melsec-sim.ir:il->ir prog))
+       (r    (first ir))
+       (expr (fourth r)))
+  (check "ANB: 1 rung"             (length ir) 1)
+  (check "ANB: kind = :normal"     (second r)  :normal)
+  ;; (X0 AND X1) AND (X2 AND X3) → flat (:and x0 x1 x2 x3)
+  (check "ANB: expr op = :and"     (melsec-sim.ir:node-op expr) :and)
+  (check "ANB: :and arity = 4"     (length (melsec-sim.ir:node-args expr)) 4))
+
+(format t "~%=== IL->IR: ORB block OR ===~%")
+(let* ((prog '((ld x0) (and x1) (ld x2) (and x3) (orb) (out y1)))
+       (ir   (melsec-sim.ir:il->ir prog))
+       (r    (first ir))
+       (expr (fourth r)))
+  (check "ORB: 1 rung"             (length ir) 1)
+  ;; (:or (:and x0 x1) (:and x2 x3))
+  (check "ORB: expr op = :or"      (melsec-sim.ir:node-op expr) :or)
+  (check "ORB: :or arity = 2"      (length (melsec-sim.ir:node-args expr)) 2)
+  (let ((a (first  (melsec-sim.ir:node-args expr)))
+        (b (second (melsec-sim.ir:node-args expr))))
+    (check "ORB: branch-a op = :and" (melsec-sim.ir:node-op a) :and)
+    (check "ORB: branch-b op = :and" (melsec-sim.ir:node-op b) :and)))
+
+(format t "~%=== IL->IR: MPS / MRD / MPP multi-output ===~%")
+(let* ((prog '((ld x0) (mps) (and x1) (out y1)
+               (mrd) (and x2) (out y2)
+               (mpp) (out y3)))
+       (ir (melsec-sim.ir:il->ir prog)))
+  (check "MPS: 3 rungs"           (length ir) 3)
+  ;; Rung y1: (x0 AND x1)
+  (check "MPS: rung0 operand y1" (third  (first  ir)) 'y1)
+  (let ((e0 (fourth (first ir))))
+    (check "MPS: rung0 :and"     (melsec-sim.ir:node-op e0) :and)
+    (check "MPS: rung0 arity 2" (length (melsec-sim.ir:node-args e0)) 2))
+  ;; Rung y2: (x0 AND x2)
+  (check "MPS: rung1 operand y2" (third  (second ir)) 'y2)
+  (let ((e1 (fourth (second ir))))
+    (check "MPS: rung1 :and"     (melsec-sim.ir:node-op e1) :and))
+  ;; Rung y3: plain x0 contact (MPP restores the bare save)
+  (check "MPS: rung2 operand y3" (third  (third  ir)) 'y3)
+  (check-equal "MPS: rung2 bare x0 contact"
+               (fourth (third ir)) '(:contact :no x0)))
+
+(format t "~%=== IL->IR: data register MOV / ADD ===~%")
+(let* ((prog '((ld m0) (mov 42 d0)
+               (ld m0) (add d0 8 d1)))
+       (ir (melsec-sim.ir:il->ir prog))
+       (mov-r (first  ir))
+       (add-r (second ir)))
+  (check "DATA: 2 rungs"            (length ir) 2)
+  ;; MOV rung: (:coil :mov d0 (:contact :no m0) 42)
+  (check "MOV: kind = :mov"         (second mov-r) :mov)
+  (check "MOV: operand = d0"        (third  mov-r) 'd0)
+  (check "MOV: src = 42"            (fifth  mov-r) 42)
+  (check-equal "MOV: cond = m0 contact"   (fourth mov-r) '(:contact :no m0))
+  ;; ADD rung: (:coil :add d1 (:contact :no m0) d0 8)
+  (check "ADD: kind = :add"         (second add-r) :add)
+  (check "ADD: operand = d1"        (third  add-r) 'd1)
+  (check "ADD: s1 = d0"             (fifth  add-r) 'd0)
+  (check "ADD: s2 = 8"              (sixth  add-r) 8))
+
+(format t "~%=== IL->IR: print-ir smoke test ===~%")
+(let* ((ir (melsec-sim.ir:il->ir *example-program*))
+       (out (with-output-to-string (s)
+              (melsec-sim.ir:print-ir ir s))))
+  (check "print-ir: non-empty output" (> (length out) 0) t)
+  (check "print-ir: contains :normal" (not (null (search "NORMAL" out))) t)
+  (check "print-ir: contains :ton"    (not (null (search "TON"    out))) t)
+  (check "print-ir: contains :ctu"    (not (null (search "CTU"    out))) t))
 
 (format t "~%Done.~%")
