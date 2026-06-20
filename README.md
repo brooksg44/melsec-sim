@@ -192,6 +192,59 @@ The window has three areas:
 | `Stop` | Pause free-run |
 | `Toggle <op>` | Flip a bit by name (e.g. `Toggle X0`) |
 
+## Troubleshooting
+
+### `cl-ppcre`/`cl-unicode` symbol error on load
+
+If `ql:quickload "melsec-sim/clim"` fails with:
+
+```
+no symbol named "*STANDARD-OPTIMIZE-SETTINGS*" in "CL-PPCRE"
+```
+
+two things can trigger it:
+
+**1. A stale local `cl-ppcre` is shadowing the Quicklisp version.**
+
+ASDF searches `~/common-lisp/` before Quicklisp's dist.  If an older copy of
+`cl-ppcre` lives there (e.g. from a tutorial project), it wins.  Identify it:
+
+```lisp
+(asdf:system-source-file (asdf:find-system "cl-ppcre"))
+```
+
+If the path is not under `~/quicklisp/`, rename its `.asd` so ASDF ignores it:
+
+```bash
+mv /path/to/old/cl-ppcre/cl-ppcre.asd \
+   /path/to/old/cl-ppcre/cl-ppcre.asd.bak
+```
+
+**2. `cl-ppcre ≥ 20250622` stopped exporting `*standard-optimize-settings*`**
+**and `with-rebinding`, which `cl-unicode` imports from it.**
+
+Add the two symbols back to `cl-ppcre`'s export list:
+
+```bash
+# find the file
+grep -r "do-register-groups" ~/quicklisp/dists/quicklisp/software/cl-ppcre*/packages.lisp
+```
+
+Append before the closing `))`:
+
+```lisp
+           ;; re-exported for cl-unicode compatibility
+           :*standard-optimize-settings*
+           :with-rebinding
+```
+
+Then delete the stale `cl-ppcre` and `cl-unicode` fasls so they recompile:
+
+```bash
+find ~/.cache/common-lisp -name "*.fasl" \
+     \( -path "*cl-ppcre*" -o -path "*cl-unicode*" \) -delete
+```
+
 ## Example Program
 
 The built-in `*example-program*` demonstrates three ladder networks:
