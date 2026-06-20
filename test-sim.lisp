@@ -371,4 +371,166 @@
   (check "print-ir: contains :ton"    (not (null (search "TON"    out))) t)
   (check "print-ir: contains :ctu"    (not (null (search "CTU"    out))) t))
 
+;; -----------------------------------------------------------------------
+;; Load layout engine
+;; -----------------------------------------------------------------------
+(load (merge-pathnames "layout.lisp" *load-pathname*))
+
+;;; -----------------------------------------------------------------------
+;;; Layout engine: expr-size
+;;; -----------------------------------------------------------------------
+(format t "~%=== Layout: expr-size ===~%")
+(multiple-value-bind (w h) (melsec-sim.layout:expr-size '(:contact :no x0))
+  (check "contact size w=2" w 2)
+  (check "contact size h=1" h 1))
+
+(multiple-value-bind (w h)
+    (melsec-sim.layout:expr-size '(:and (:contact :no x0) (:contact :no x1)))
+  (check "AND(2) width=4"  w 4)
+  (check "AND(2) height=1" h 1))
+
+(multiple-value-bind (w h)
+    (melsec-sim.layout:expr-size '(:or (:contact :no x0) (:contact :no x1)))
+  (check "OR(2) width=2"  w 2)
+  (check "OR(2) height=2" h 2))
+
+;; Three-branch OR: width = max(2,2,2)=2, height = 1+1+1=3
+(multiple-value-bind (w h)
+    (melsec-sim.layout:expr-size
+     '(:or (:contact :no x0) (:contact :no x1) (:contact :no x2)))
+  (check "OR(3) width=2"  w 2)
+  (check "OR(3) height=3" h 3))
+
+;; nil = bare wire
+(multiple-value-bind (w h) (melsec-sim.layout:expr-size nil)
+  (check "nil size w=1" w 1)
+  (check "nil size h=1" h 1))
+
+;;; -----------------------------------------------------------------------
+;;; Layout engine: single-contact rung primitives
+;;; -----------------------------------------------------------------------
+(format t "~%=== Layout: single-contact rung ===~%")
+(let* ((ir   (melsec-sim.ir:il->ir '((ld x0) (out y0))))
+       (prims (melsec-sim.layout:layout-rung (first ir) :row 0)))
+
+  ;; Must contain exactly 1 :contact, 1 :coil, and ≥1 :wire
+  (check "single: 1 contact"
+         (length (melsec-sim.layout:prims-of-kind :contact prims)) 1)
+  (check "single: 1 coil"
+         (length (melsec-sim.layout:prims-of-kind :coil prims)) 1)
+  (check "single: has wires"
+         (> (length (melsec-sim.layout:prims-of-kind :wire prims)) 0) t)
+
+  ;; Contact is at (0,0)
+  (let ((c (first (melsec-sim.layout:prims-of-kind :contact prims))))
+    (check "single: contact x=0" (second c) 0)
+    (check "single: contact y=0" (third  c) 0)
+    (check "single: contact mode=:no" (fourth c) :no))
+
+  ;; Coil kind and position: coil x = w+1 = 2+1 = 3
+  (let ((coil (first (melsec-sim.layout:prims-of-kind :coil prims))))
+    (check "single: coil kind=:normal" (fourth coil) :normal)
+    (check "single: coil x=3"          (second coil) 3)
+    (check "single: coil y=0"          (third  coil) 0)))
+
+;;; -----------------------------------------------------------------------
+;;; Layout engine: series (AND) rung — two contacts side by side
+;;; -----------------------------------------------------------------------
+(format t "~%=== Layout: series AND rung ===~%")
+(let* ((ir    (melsec-sim.ir:il->ir '((ld x0) (and x1) (out y0))))
+       (prims  (melsec-sim.layout:layout-rung (first ir) :row 0)))
+  (check "series: 2 contacts"
+         (length (melsec-sim.layout:prims-of-kind :contact prims)) 2)
+  ;; x0 at col 0, x1 at col 2, coil at col 4+1=5
+  (let ((contacts (melsec-sim.layout:prims-of-kind :contact prims)))
+    (check "series: first contact x=0"  (second (first  contacts)) 0)
+    (check "series: second contact x=2" (second (second contacts)) 2))
+  (let ((coil (first (melsec-sim.layout:prims-of-kind :coil prims))))
+    (check "series: coil x=5" (second coil) 5)))
+
+;;; -----------------------------------------------------------------------
+;;; Layout engine: parallel (OR) rung — vertical rails emitted
+;;; -----------------------------------------------------------------------
+(format t "~%=== Layout: parallel OR rung ===~%")
+(let* (;; (X0 OR X1) → Y0
+       (ir    (melsec-sim.ir:il->ir '((ld x0) (or x1) (out y0))))
+       (prims  (melsec-sim.layout:layout-rung (first ir) :row 0)))
+  (check "parallel: 2 contacts"
+         (length (melsec-sim.layout:prims-of-kind :contact prims)) 2)
+  ;; Vertical wires are needed to join the two branches
+  (let ((vwires (remove-if-not
+                 (lambda (p)
+                   (and (eq (melsec-sim.layout:prim-kind p) :wire)
+                        (= (second p) (fourth p))))   ; x1=x2 → vertical
+                 prims)))
+    (check "parallel: ≥2 vertical wires" (>= (length vwires) 2) t))
+  ;; Branch 2 contact (x1) should be at row 1
+  (let ((contacts (melsec-sim.layout:prims-of-kind :contact prims)))
+    (check "parallel: branch-1 row=0" (third (first  contacts)) 0)
+    (check "parallel: branch-2 row=1" (third (second contacts)) 1)))
+
+;;; -----------------------------------------------------------------------
+;;; Layout engine: timer rung — preset carried through to :coil primitive
+;;; -----------------------------------------------------------------------
+(format t "~%=== Layout: timer rung (preset in coil) ===~%")
+(let* ((ir    (melsec-sim.ir:il->ir '((ld y0) (tim t0 1000))))
+       (prims  (melsec-sim.layout:layout-rung (first ir) :row 0))
+       (coil   (first (melsec-sim.layout:prims-of-kind :coil prims))))
+  (check "timer: coil kind=:ton" (fourth coil) :ton)
+  ;; coil = (:coil x y :ton t0 1000) — preset is 6th element
+  (check "timer: preset=1000" (sixth coil) 1000))
+
+;;; -----------------------------------------------------------------------
+;;; Layout engine: data-register rung — emits :fb, not :coil
+;;; -----------------------------------------------------------------------
+(format t "~%=== Layout: data-register MOV rung ===~%")
+(let* ((ir    (melsec-sim.ir:il->ir '((ld m0) (mov 42 d0))))
+       (prims  (melsec-sim.layout:layout-rung (first ir) :row 0)))
+  (check "mov: 0 :coil primitives"
+         (length (melsec-sim.layout:prims-of-kind :coil prims)) 0)
+  (check "mov: 1 :fb primitive"
+         (length (melsec-sim.layout:prims-of-kind :fb prims)) 1)
+  (let ((fb (first (melsec-sim.layout:prims-of-kind :fb prims))))
+    ;; (:fb x y w h label)
+    (check "mov: fb width=2"  (fourth fb) 2)
+    (check "mov: fb height=1" (fifth  fb) 1)
+    (check "mov: label contains MOV"
+           (not (null (search "MOV" (sixth fb)))) t)))
+
+;;; -----------------------------------------------------------------------
+;;; Layout engine: layout-program — row starts and total rows
+;;; -----------------------------------------------------------------------
+(format t "~%=== Layout: layout-program row accounting ===~%")
+(let* ((ir (melsec-sim.ir:il->ir *example-program*)))
+  ;; Rung0 expr is (:and (:or x0 y0) x1/) — the :OR has height=2,
+  ;; so rung0 height = max(2,1) = 2.  With row-gap=1:
+  ;;   rung0=0, rung1=0+2+1=3, rung2=3+1+1=5, total=5+1+1=7
+  (multiple-value-bind (prims total starts)
+      (melsec-sim.layout:layout-program ir :row-gap 1)
+    (check "prog: 3 row starts"          (length starts) 3)
+    (check "prog: rung0 starts at row 0" (first  starts) 0)
+    (check "prog: rung1 starts at row 3" (second starts) 3)
+    (check "prog: rung2 starts at row 5" (third  starts) 5)
+    (check "prog: total rows=7"          total 7)
+    (check "prog: has primitives"        (> (length prims) 0) t)))
+
+;; Compact layout (row-gap=0): rung0=0, rung1=2, rung2=3, total=4
+(let* ((ir (melsec-sim.ir:il->ir *example-program*)))
+  (multiple-value-bind (_p total starts)
+      (melsec-sim.layout:layout-program ir :row-gap 0)
+    (declare (ignore _p))
+    (check "compact: rung0 row=0" (first  starts) 0)
+    (check "compact: rung1 row=2" (second starts) 2)
+    (check "compact: rung2 row=3" (third  starts) 3)
+    (check "compact: total=4"     total 4)))
+
+;; Parallel rung height: OR with 2 branches → height=2; row-gap=1 → next rung at row 3
+(let* ((ir (melsec-sim.ir:il->ir '((ld x0) (or x1) (out y0)
+                                   (ld x2) (out y1)))))
+  (multiple-value-bind (_p _t starts)
+      (melsec-sim.layout:layout-program ir :row-gap 1)
+    (declare (ignore _p _t))
+    (check "parallel height: rung0 row=0" (first  starts) 0)
+    (check "parallel height: rung1 row=3" (second starts) 3)))
+
 (format t "~%Done.~%")
