@@ -25,6 +25,15 @@
   :depends-on ("melsec-sim/ir")
   :components ((:file "layout")))
 
+;; SVG renderer — dependency-free static/live ladder snapshots.
+(asdf:defsystem "melsec-sim/svg"
+  :description "SVG ladder diagram renderer for melsec-sim"
+  :author "Gregory Brooks"
+  :license "MIT"
+  :version "0.1.0"
+  :depends-on ("melsec-sim" "melsec-sim/ir" "melsec-sim/layout")
+  :components ((:file "svg")))
+
 ;; McCLIM ladder viewer — opt-in GUI; core stays lightweight without it.
 (asdf:defsystem "melsec-sim/clim"
   :description "McCLIM ladder diagram viewer for melsec-sim"

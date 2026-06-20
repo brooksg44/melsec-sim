@@ -89,6 +89,7 @@ Addresses are plain Lisp symbols (`'x0`, `'y1`, `'d0`, etc.).
 | `il-to-ir.lisp` | Stack-to-tree IL → IR parser (`melsec-sim/ir`) |
 | `layout.lisp` | Two-pass backend-agnostic ladder layout engine (`melsec-sim/layout`) |
 | `clim-ui.lisp` | Interactive McCLIM ladder viewer (`melsec-sim/clim`) |
+| `svg.lisp` | Dependency-free SVG ladder diagram renderer (`melsec-sim/svg`) |
 | `test-sim.lisp` | Verification checks covering all instruction groups |
 | `single-step.lisp` | Manual single-scan demo |
 | `continuous.lisp` | Continuous background-thread scan demo |
@@ -100,6 +101,7 @@ Addresses are plain Lisp symbols (`'x0`, `'y1`, `'d0`, etc.).
 | `melsec-sim` | `bordeaux-threads` | Core simulator |
 | `melsec-sim/ir` | — | IL → IR expression-tree parser |
 | `melsec-sim/layout` | `melsec-sim/ir` | Backend-agnostic grid layout engine |
+| `melsec-sim/svg` | `melsec-sim`, `melsec-sim/ir`, `melsec-sim/layout` | Dependency-free SVG renderer |
 | `melsec-sim/clim` | `melsec-sim`, `melsec-sim/ir`, `melsec-sim/layout`, `mcclim` | Interactive ladder viewer |
 | `melsec-sim/tests` | `melsec-sim`, `melsec-sim/ir`, `melsec-sim/layout` | Test suite |
 
@@ -158,6 +160,36 @@ ln -s /path/to/melsec-sim ~/quicklisp/local-projects/melsec-sim
 
 `set-input` and `get-output` are thread-safe; they hold the PLC lock so they
 never race the background scan thread.
+
+## SVG Renderer
+
+`melsec-sim/svg` renders a ladder diagram as a self-contained SVG file.  It has
+no dependencies beyond the core system — no McCLIM required.
+
+```lisp
+(ql:quickload "melsec-sim/svg")
+
+;; Static snapshot — all elements drawn in grey
+(melsec-sim.svg:render-to-file melsec-sim:*example-program* #p"ladder.svg")
+
+;; Return SVG as a string
+(melsec-sim.svg:render-to-string melsec-sim:*example-program*)
+
+;; Live snapshot — energised contacts and coils coloured green
+(defvar *plc* (melsec-sim:make-plc melsec-sim:*example-program*))
+(melsec-sim:plc-set-bit *plc* 'x0 t)
+(melsec-sim:plc-step *plc*)
+(melsec-sim.svg:render-to-file melsec-sim:*example-program* #p"ladder.svg" :plc *plc*)
+
+;; Adjust cell size (default 56 px) and margin (default 32 px)
+(melsec-sim.svg:render-to-file program #p"ladder.svg" :cell 72 :margin 48)
+```
+
+The renderer uses the same layout primitives as the McCLIM UI:
+- Contacts draw as `|  |` (NC contacts get a diagonal slash)
+- Normal coils draw as `( )`, set/reset as `(S)` / `(R)`
+- Timer and counter outputs draw as a labelled box showing mnemonic and `CV/PT`
+- MOV / ADD / SUB / CMP draw as a shaded function-block box
 
 ## McCLIM Ladder Viewer
 
@@ -285,6 +317,15 @@ sbcl --noinform --load test-sim.lisp --eval '(quit)'
 All 128 checks should report `[PASS]`.
 
 ## Changelog
+
+### v0.5.0
+
+- **`melsec-sim/svg`** — dependency-free SVG ladder diagram renderer (`svg.lisp`).
+  Consumes the same backend-agnostic layout primitives as the McCLIM UI:
+  contacts with NO/NC styling, coil arcs with `( )` / `(S)` / `(R)` labels,
+  two-cell-wide timer/counter boxes showing `CV/PT`, shaded function-block boxes
+  for MOV/ADD/SUB/CMP.  Pass `:plc` to colour energised elements green.
+  Entry points: `render-to-file`, `render-to-string`, `render-to-stream`.
 
 ### v0.4.0
 
