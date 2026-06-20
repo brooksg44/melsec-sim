@@ -1,5 +1,29 @@
 # ToDo
 
+## SVG Renderer — DONE
+
+Shipped in v0.5.0.
+
+### Task
+
+- **SVG renderer** ✓ (`svg.lisp`, `melsec-sim/svg`)
+  - Dependency-free: only `melsec-sim`, `melsec-sim/ir`, `melsec-sim/layout`.
+  - Contacts with NO/NC styling; coil arcs forming `( )` / `(S)` / `(R)`;
+    two-cell-wide timer/counter boxes showing `CV/PT`; shaded FB boxes for
+    MOV/ADD/SUB/CMP.
+  - Pass `:plc` to colour energised elements green.
+  - Entry points: `render-to-file`, `render-to-string`, `render-to-stream`.
+
+### Entry point
+
+```lisp
+(ql:quickload "melsec-sim/svg")
+(melsec-sim.svg:render-to-file melsec-sim:*example-program* #p"ladder.svg")
+(melsec-sim.svg:render-to-file melsec-sim:*example-program* #p"ladder.svg" :plc *plc*)
+```
+
+---
+
 ## McCLIM Ladder Diagram Display — DONE
 
 All five tasks completed and shipped in v0.4.0.
