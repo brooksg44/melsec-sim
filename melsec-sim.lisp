@@ -12,7 +12,16 @@
            #:get-word
            #:set-word
            #:print-state
-           #:*example-program*))
+           #:*example-program*
+           ;; Accessor helpers used by melsec-sim/clim and other extensions
+           #:plc-program
+           #:plc-get-bit
+           #:plc-set-bit
+           #:plc-timer-acc
+           #:plc-counter-cv
+           #:plc-scan-count
+           #:plc-snapshot-bits
+           #:plc-snapshot-words))
 
 (in-package :melsec-sim)
 
@@ -29,9 +38,10 @@
    (mstack    :accessor mstack    :initform nil) ; master control stack (MPS/MRD/MPP)
    (program   :accessor program   :initarg :program :initform nil)
    (scan-time-ms :accessor scan-time-ms :initarg :scan-time-ms :initform 100)
-   (running   :accessor running   :initform nil)
-   (lock      :accessor lock      :initform nil)
-   (thread    :accessor thread    :initform nil)))
+   (running    :accessor running    :initform nil)
+   (scan-count :accessor scan-count :initform 0)
+   (lock       :accessor lock       :initform nil)
+   (thread     :accessor thread     :initform nil)))
 
 (defun make-plc (program &key (scan-time-ms 100))
   (let ((plc (make-instance 'plc :program program :scan-time-ms scan-time-ms)))
@@ -255,7 +265,8 @@
   (bt:with-recursive-lock-held ((lock plc))
     (setf (stack plc) nil)
     (dolist (instr (program plc))
-      (eval-instr plc instr))))
+      (eval-instr plc instr))
+    (incf (scan-count plc))))
 
 ;;;
 ;;; 5. Simulator Control (Interactive / Background Thread)
@@ -311,7 +322,56 @@
     (format t "-------------------~%")))
 
 ;;;
-;;; 7. Example Ladder Logic Program
+;;; 7. Public accessors for extension packages (melsec-sim/clim etc.)
+;;;
+
+(defun plc-program (plc)
+  "Returns the PLC's instruction list."
+  (program plc))
+
+(defun plc-get-bit (plc addr)
+  "Reads any bit from PLC memory, thread-safe."
+  (bt:with-recursive-lock-held ((lock plc))
+    (get-bit plc addr)))
+
+(defun plc-set-bit (plc addr val)
+  "Writes any bit to PLC memory, thread-safe."
+  (bt:with-recursive-lock-held ((lock plc))
+    (set-bit plc addr val)))
+
+(defun plc-timer-acc (plc addr)
+  "Returns the timer accumulator (ms) for ADDR, or NIL if not yet initialised."
+  (bt:with-recursive-lock-held ((lock plc))
+    (let ((tmr (gethash addr (timers plc))))
+      (and tmr (getf tmr :acc)))))
+
+(defun plc-counter-cv (plc addr)
+  "Returns the counter current value for ADDR, or NIL if not yet initialised."
+  (bt:with-recursive-lock-held ((lock plc))
+    (let ((cnt (gethash addr (counters plc))))
+      (and cnt (getf cnt :count)))))
+
+(defun plc-scan-count (plc)
+  "Returns the total number of completed scan cycles."
+  (bt:with-recursive-lock-held ((lock plc))
+    (scan-count plc)))
+
+(defun plc-snapshot-bits (plc)
+  "Returns a fresh alist of (sym . val) for every bit in memory, under lock."
+  (bt:with-recursive-lock-held ((lock plc))
+    (let ((result '()))
+      (maphash (lambda (k v) (push (cons k v) result)) (memory plc))
+      result)))
+
+(defun plc-snapshot-words (plc)
+  "Returns a fresh alist of (sym . val) for every D register, under lock."
+  (bt:with-recursive-lock-held ((lock plc))
+    (let ((result '()))
+      (maphash (lambda (k v) (push (cons k v) result)) (data-regs plc))
+      result)))
+
+;;;
+;;; 8. Example Ladder Logic Program
 ;;;
 
 ;; Network 1: Motor Start-Stop Seal-in
